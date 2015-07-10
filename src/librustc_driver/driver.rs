@@ -37,6 +37,8 @@ use std::ffi::{OsString, OsStr};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
 use syntax::ast;
 use syntax::attr;
 use syntax::attr::AttrMetaMethods;
@@ -62,11 +64,59 @@ pub fn compile_input(sess: Session,
         }
     })}
 
+    let (sender, receiver) = channel();
+    if sess.show_progress() {
+        let prev_send = "Not started";
+        let spinner_states = vec!['/', '-', '\\', '|']; 
+        thread::spawn(move || {
+            let mut terminal = term::stdout().unwrap();
+            loop {
+                let curr_proc = match receiver.try_recv() {
+                    Err(_) => prev_send,
+                    Ok(value) => value,
+                };
+                prev_send = curr_proc;
+                if curr_proc == "Done" {
+                    break;
+                }
+                for it in vec.iter() {
+                    terminal.fg(term::color::YELLOW).unwrap();
+                    thread::sleep_ms(100);
+                    terminal.carriage_return().unwrap();
+                    write!(terminal, "[{0}] {1}\n", it, curr_proc).unwrap(); 
+                    terminal.cursor_up().unwrap();
+                    terminal.delete_line().unwrap();
+                }
+            }
+
+            loop {
+                let curr_proc = match receiver.recv() {
+                    Ok(value) => value,
+                    Err(_) => "Error",
+                };
+                terminal.cursor_up().unwrap();
+                terminal.delete_line().unwrap();
+                if curr_proc == "Error" {
+                    terminal.fg(term::color::RED).unwrap();
+                    write!(terminal, "{0}\n", "Error occured while trying to write the process to the terminal.").unwrap();
+                    break;
+                }
+                terminal.fg(term::color::BRIGHT_GREEN).unwrap();
+                write!(terminal, "[+] {0}\n", curr_proc).unwrap();
+                if curr_proc == "Compilation successful!" {
+                    break;
+                }
+        });
+    }
+
     // We need nested scopes here, because the intermediate results can keep
     // large chunks of memory alive and we want to free them as soon as
     // possible to keep the peak memory usage low
     let (sess, result) = {
         let (outputs, expanded_crate, id) = {
+            if sess.show_progress() {
+                sender.send("Parsing").unwrap();
+            }
             let krate = phase_1_parse_input(&sess, cfg, input);
 
             controller_entry_point!(after_parse,
@@ -84,6 +134,9 @@ pub fn compile_input(sess: Session,
             let id = link::find_crate_name(Some(&sess),
                                            &krate.attrs,
                                            input);
+            if sess.show_progress() {
+                sender.send("Configuring and expanding").unwrap();
+            }
             let expanded_crate
                 = match phase_2_configure_and_expand(&sess,
                                                      krate,
@@ -119,6 +172,9 @@ pub fn compile_input(sess: Session,
                                                                      &ast_map.krate(),
                                                                      &id[..]));
 
+        if sess.show_progress() {
+            sender.send("Analyzing").unwrap();
+        }
         phase_3_run_analysis_passes(sess,
                                     ast_map,
                                     &arenas,
@@ -145,6 +201,9 @@ pub fn compile_input(sess: Session,
                 println!("Pre-trans");
                 tcx.print_debug_stats();
             }
+            if sess.show_progress() {
+                sender.send("Translating to LLVM").unwrap();
+            }
             let trans = phase_4_translate_to_llvm(tcx, analysis);
 
             if log_enabled!(::log::INFO) {
@@ -165,6 +224,9 @@ pub fn compile_input(sess: Session,
         return;
     };
 
+    if sess.show_progress() {
+        sender.send("Optimizing LLVM").unwrap();
+    }
     phase_5_run_llvm_passes(&sess, &trans, &outputs);
 
     controller_entry_point!(after_llvm,
@@ -174,7 +236,15 @@ pub fn compile_input(sess: Session,
                                                            outdir,
                                                            &trans));
 
+    if sess.show_progress() {
+        sender.send("Linking").unwrap();
+    }
     phase_6_link_output(&sess, &trans, &outputs);
+
+    if sess.show_progress() {
+        sender.send("Done").unwrap();
+        sender.send("Compilation succesful!").unwrap();
+    }
 }
 
 /// The name used for source code that doesn't originate in a file
@@ -350,7 +420,6 @@ impl<'a, 'ast, 'tcx> CompileState<'a, 'ast, 'tcx> {
 
 pub fn phase_1_parse_input(sess: &Session, cfg: ast::CrateConfig, input: &Input)
     -> ast::Crate {
-    sess.show_progress("Parsing");
     // These may be left in an incoherent state after a previous compile.
     // `clear_tables` and `get_ident_interner().clear()` can be used to free
     // memory, but they do not restore the initial state.
@@ -397,7 +466,6 @@ pub fn phase_2_configure_and_expand(sess: &Session,
                                     crate_name: &str,
                                     addl_plugins: Option<Vec<String>>)
                                     -> Option<ast::Crate> {
-    sess.show_progress("Configuring and expanding");
     let time_passes = sess.time_passes();
 
     // strip before anything else because crate metadata may use #[cfg_attr]
@@ -607,7 +675,6 @@ pub fn phase_3_run_analysis_passes<'tcx, F, R>(sess: Session,
                                                where F: for<'a> FnOnce(&'a ty::ctxt<'tcx>,
                                                                ty::CrateAnalysis) -> R
 {
-    sess.show_progress("Analyzing");
     let time_passes = sess.time_passes();
     let krate = ast_map.krate();
 
@@ -740,7 +807,6 @@ pub fn phase_3_run_analysis_passes<'tcx, F, R>(sess: Session,
 /// be discarded.
 pub fn phase_4_translate_to_llvm(tcx: &ty::ctxt, analysis: ty::CrateAnalysis)
                                  -> trans::CrateTranslation {
-    tcx.sess.show_progress("Translating to LLVM");
     let time_passes = tcx.sess.time_passes();
 
     time(time_passes, "resolving dependency formats", (), |_|
@@ -756,7 +822,6 @@ pub fn phase_4_translate_to_llvm(tcx: &ty::ctxt, analysis: ty::CrateAnalysis)
 pub fn phase_5_run_llvm_passes(sess: &Session,
                                trans: &trans::CrateTranslation,
                                outputs: &OutputFilenames) {
-    sess.show_progress("Optimizing LLVM");
     if sess.opts.cg.no_integrated_as {
         let output_type = config::OutputTypeAssembly;
 
@@ -785,7 +850,6 @@ pub fn phase_5_run_llvm_passes(sess: &Session,
 pub fn phase_6_link_output(sess: &Session,
                            trans: &trans::CrateTranslation,
                            outputs: &OutputFilenames) {
-    sess.show_progress("Linking");
     time(sess.time_passes(), "linking", (), |_|
          link::link_binary(sess,
                            trans,

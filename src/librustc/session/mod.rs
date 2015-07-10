@@ -293,9 +293,12 @@ impl Session {
             kind)
     }
 
-    pub fn show_progress(&self, state: &str) {
+    pub fn show_progress() -> bool {
         if self.opts.progress {
-            println!("{}", state);
+            return true;
+        }
+        else {
+            return false;
         }
     }
 }
