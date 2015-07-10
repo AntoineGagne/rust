@@ -117,7 +117,8 @@ pub struct Options {
     /// out-of-tree drivers.
     pub alt_std_name: Option<String>,
     /// Indicates how the compiler should treat unstable features
-    pub unstable_features: UnstableFeatures
+    pub unstable_features: UnstableFeatures,
+    pub progress: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -226,6 +227,7 @@ pub fn basic_options() -> Options {
         libs: Vec::new(),
         unstable_features: UnstableFeatures::Disallow,
         debug_assertions: true,
+        progress: false,
     }
 }
 
@@ -828,6 +830,7 @@ pub fn rustc_optgroups() -> Vec<RustcOptGroup> {
                       `everybody_loops` (all function bodies replaced with `loop {}`).",
                      "TYPE"),
         opt::opt_u("", "show-span", "Show spans for compiler debugging", "expr|pat|ty"),
+        opt::flag("", "progress", "Show pretty printed progress during compilation."),   
     ]);
     opts
 }
@@ -1016,6 +1019,7 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
     }
 
     let crate_name = matches.opt_str("crate-name");
+    let progress = matches.opt_present("progress");
 
     Options {
         crate_types: crate_types,
@@ -1046,6 +1050,7 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
         libs: libs,
         unstable_features: get_unstable_features_setting(),
         debug_assertions: debug_assertions,
+        progress: progress,
     }
 }
 

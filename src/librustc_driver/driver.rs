@@ -350,6 +350,7 @@ impl<'a, 'ast, 'tcx> CompileState<'a, 'ast, 'tcx> {
 
 pub fn phase_1_parse_input(sess: &Session, cfg: ast::CrateConfig, input: &Input)
     -> ast::Crate {
+    sess.show_progress("Parsing");
     // These may be left in an incoherent state after a previous compile.
     // `clear_tables` and `get_ident_interner().clear()` can be used to free
     // memory, but they do not restore the initial state.
@@ -396,6 +397,7 @@ pub fn phase_2_configure_and_expand(sess: &Session,
                                     crate_name: &str,
                                     addl_plugins: Option<Vec<String>>)
                                     -> Option<ast::Crate> {
+    sess.show_progress("Configuring and expanding");
     let time_passes = sess.time_passes();
 
     // strip before anything else because crate metadata may use #[cfg_attr]
@@ -605,6 +607,7 @@ pub fn phase_3_run_analysis_passes<'tcx, F, R>(sess: Session,
                                                where F: for<'a> FnOnce(&'a ty::ctxt<'tcx>,
                                                                ty::CrateAnalysis) -> R
 {
+    sess.show_progress("Analyzing");
     let time_passes = sess.time_passes();
     let krate = ast_map.krate();
 
@@ -737,6 +740,7 @@ pub fn phase_3_run_analysis_passes<'tcx, F, R>(sess: Session,
 /// be discarded.
 pub fn phase_4_translate_to_llvm(tcx: &ty::ctxt, analysis: ty::CrateAnalysis)
                                  -> trans::CrateTranslation {
+    tcx.sess.show_progress("Translating to LLVM");
     let time_passes = tcx.sess.time_passes();
 
     time(time_passes, "resolving dependency formats", (), |_|
@@ -752,6 +756,7 @@ pub fn phase_4_translate_to_llvm(tcx: &ty::ctxt, analysis: ty::CrateAnalysis)
 pub fn phase_5_run_llvm_passes(sess: &Session,
                                trans: &trans::CrateTranslation,
                                outputs: &OutputFilenames) {
+    sess.show_progress("Optimizing LLVM");
     if sess.opts.cg.no_integrated_as {
         let output_type = config::OutputTypeAssembly;
 
@@ -780,6 +785,7 @@ pub fn phase_5_run_llvm_passes(sess: &Session,
 pub fn phase_6_link_output(sess: &Session,
                            trans: &trans::CrateTranslation,
                            outputs: &OutputFilenames) {
+    sess.show_progress("Linking");
     time(sess.time_passes(), "linking", (), |_|
          link::link_binary(sess,
                            trans,

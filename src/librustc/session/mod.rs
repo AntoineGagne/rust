@@ -292,6 +292,12 @@ impl Session {
             &self.opts.search_paths,
             kind)
     }
+
+    pub fn show_progress(&self, state: &str) {
+        if self.opts.progress {
+            println!("{}", state);
+        }
+    }
 }
 
 fn split_msg_into_multilines(msg: &str) -> Option<String> {
