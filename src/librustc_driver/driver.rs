@@ -106,6 +106,7 @@ pub fn compile_input(sess: Session,
                 if curr_proc == "Compilation successful!" {
                     break;
                 }
+            }
         });
     }
 
