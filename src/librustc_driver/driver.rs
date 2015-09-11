@@ -37,7 +37,8 @@ use std::ffi::{OsString, OsStr};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::channel;
+use term;
 use std::thread;
 use syntax::ast;
 use syntax::attr;
@@ -66,26 +67,29 @@ pub fn compile_input(sess: Session,
 
     let (sender, receiver) = channel();
     if sess.show_progress() {
-        let prev_send = "Not started";
+        let mut prev_send = "Not started";
         let spinner_states = vec!['/', '-', '\\', '|']; 
         thread::spawn(move || {
             let mut terminal = term::stdout().unwrap();
             loop {
                 let curr_proc = match receiver.try_recv() {
-                    Err(_) => prev_send,
                     Ok(value) => value,
+                    Err(_) => prev_send,
                 };
                 prev_send = curr_proc;
                 if curr_proc == "Done" {
                     break;
                 }
-                for it in vec.iter() {
+                for it in spinner_states.iter() {
                     terminal.fg(term::color::YELLOW).unwrap();
                     thread::sleep_ms(100);
-                    terminal.carriage_return().unwrap();
+                    write!(terminal, "\r").unwrap();
+                    //terminal.carriage_return().unwrap();
                     write!(terminal, "[{0}] {1}\n", it, curr_proc).unwrap(); 
-                    terminal.cursor_up().unwrap();
-                    terminal.delete_line().unwrap();
+                    write!(terminal, "\x1b[1F").unwrap();
+                    write!(terminal, "\x1b[K").unwrap();
+                    //terminal.cursor_up().unwrap();
+                    //terminal.delete_line().unwrap();
                 }
             }
 
@@ -94,8 +98,10 @@ pub fn compile_input(sess: Session,
                     Ok(value) => value,
                     Err(_) => "Error",
                 };
-                terminal.cursor_up().unwrap();
-                terminal.delete_line().unwrap();
+                write!(terminal, "\x1b[1F").unwrap();
+                write!(terminal, "\x1b[K").unwrap();
+                //terminal.cursor_up().unwrap();
+                //terminal.delete_line().unwrap();
                 if curr_proc == "Error" {
                     terminal.fg(term::color::RED).unwrap();
                     write!(terminal, "{0}\n", "Error occured while trying to write the process to the terminal.").unwrap();
@@ -202,9 +208,9 @@ pub fn compile_input(sess: Session,
                 println!("Pre-trans");
                 tcx.print_debug_stats();
             }
-            if sess.show_progress() {
-                sender.send("Translating to LLVM").unwrap();
-            }
+            //if sess.show_progress() {
+                //sender.send("Translating to LLVM").unwrap();
+            //}
             let trans = phase_4_translate_to_llvm(tcx, analysis);
 
             if log_enabled!(::log::INFO) {
@@ -244,7 +250,7 @@ pub fn compile_input(sess: Session,
 
     if sess.show_progress() {
         sender.send("Done").unwrap();
-        sender.send("Compilation succesful!").unwrap();
+        sender.send("Compilation successful!").unwrap();
     }
 }
 
